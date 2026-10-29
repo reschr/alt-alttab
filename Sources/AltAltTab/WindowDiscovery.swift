@@ -50,6 +50,13 @@ enum WindowDiscovery {
     struct Window {
         let snapshot: WindowSnapshot
         let application: NSRunningApplication
+        let accessibilityElement: AXUIElement?
+        let title: String?
+
+        var label: String {
+            let appName = application.localizedName ?? "Unknown app"
+            return title.map { "\(appName) — \($0)" } ?? appName
+        }
     }
 
     static func currentDesktopWindows() -> [Window]? {
@@ -64,7 +71,7 @@ enum WindowDiscovery {
                   snapshot.processID != ProcessInfo.processInfo.processIdentifier,
                   let application = NSRunningApplication(processIdentifier: snapshot.processID),
                   application.activationPolicy == .regular else { return nil }
-            return Window(snapshot: snapshot, application: application)
+            return Window(snapshot: snapshot, application: application, accessibilityElement: nil, title: snapshot.title)
         }
 
         // Use Quartz coordinates for both windows and displays: AppKit flips the Y axis.
@@ -74,17 +81,31 @@ enum WindowDiscovery {
             return CGDisplayBounds(number.uint32Value)
         }
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        // shortcut: the frontmost ordinary window of the active app approximates keyboard focus
-        // without Accessibility permission; use AXFocusedWindow when we add Accessibility support.
-        let focusedWindow = windows.first { $0.snapshot.processID == frontmostPID }
+        let focusedID = frontmostPID.flatMap { WindowAccess.focusedWindowID(processID: $0) }
+        // Before permission is granted, retain the previously validated focus approximation.
+        let focusedWindow = windows.first { $0.snapshot.id == focusedID }
+            ?? windows.first { $0.snapshot.processID == frontmostPID }
         guard let focusedWindow,
               let focusedDisplay = DisplayGeometry.displayIndex(for: focusedWindow.snapshot.bounds, displays: displays)
         else {
             // With no active ordinary window (for example the desktop), show no candidates.
             return []
         }
-        return windows.filter {
+        let candidates = windows.filter {
             DisplayGeometry.displayIndex(for: $0.snapshot.bounds, displays: displays) == focusedDisplay
+        }
+        // Ask each app once, and only for candidates on the selected monitor.
+        var elementsByProcess: [pid_t: [CGWindowID: AXUIElement]] = [:]
+        return candidates.map { window in
+            let pid = window.snapshot.processID
+            if elementsByProcess[pid] == nil { elementsByProcess[pid] = WindowAccess.windows(processID: pid) }
+            let element = elementsByProcess[pid]?[window.snapshot.id]
+            let title = element.flatMap { WindowAccess.attribute(kAXTitleAttribute, of: $0) as? String }?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return Window(
+                snapshot: window.snapshot, application: window.application, accessibilityElement: element,
+                title: title?.isEmpty == false ? title : window.snapshot.title
+            )
         }
     }
 }
