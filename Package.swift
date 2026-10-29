@@ -6,5 +6,8 @@ let package = Package(
     name: "AltAltTab",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "AltAltTab", targets: ["AltAltTab"])],
-    targets: [.executableTarget(name: "AltAltTab")]
+    targets: [
+        .executableTarget(name: "AltAltTab"),
+        .testTarget(name: "AltAltTabTests", dependencies: ["AltAltTab"])
+    ]
 )
