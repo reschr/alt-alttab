@@ -6,7 +6,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let shortcut = GlobalShortcut()
     private let switcher = SwitcherController()
-    private var permissionTimer: Timer?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var screenObserver: NSObjectProtocol?
     private var shortcutStatus = "Accessibility permission needed"
@@ -38,14 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if !WindowAccess.isTrusted { WindowAccess.requestPermission() }
         refreshShortcut()
-        // Permission can be granted while the app runs; no relaunch is required for a first grant.
-        permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshShortcut() }
-        }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
         cancelSwitching()
+        // Opening the menu picks up permission changes without periodic idle wakeups.
         refreshShortcut()
         menu.removeAllItems()
         menu.addItem(withTitle: shortcutStatus, action: nil, keyEquivalent: "")
@@ -117,7 +113,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        permissionTimer?.invalidate()
         shortcut.stop()
         for observer in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
