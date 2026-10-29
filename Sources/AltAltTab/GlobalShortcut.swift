@@ -9,7 +9,7 @@ struct ShortcutState {
     private(set) var active = false
     private var swallowedKeys: Set<Int64> = []
 
-    mutating func handle(type: CGEventType, key: Int64, flags: CGEventFlags) -> (consume: Bool, command: ShortcutCommand?) {
+    mutating func handle(type: CGEventType, key: Int64, flags: CGEventFlags, mouseInsideSwitcher: Bool = false) -> (consume: Bool, command: ShortcutCommand?) {
         if type == .keyUp { return (swallowedKeys.remove(key) != nil, nil) }
         if type == .flagsChanged, active {
             if !flags.contains(.maskAlternate) {
@@ -33,7 +33,7 @@ struct ShortcutState {
                 return (key == 53, .cancel)
             }
         }
-        if active, type == .leftMouseDown || type == .rightMouseDown {
+        if active, (type == .leftMouseDown || type == .rightMouseDown), !mouseInsideSwitcher {
             active = false
             return (false, .cancel)
         }
@@ -52,6 +52,7 @@ final class GlobalShortcut {
     private var source: CFRunLoopSource?
     private var commandGeneration = 0
     private var state = ShortcutState()
+    var containsMouseLocation: ((CGPoint) -> Bool)?
     var onCommand: ((ShortcutCommand) -> Void)?
     var isRunning: Bool { tap != nil }
 
@@ -101,7 +102,11 @@ final class GlobalShortcut {
             stop()
             return false
         }
-        let result = state.handle(type: type, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags)
+        // In-panel clicks must reach SwiftUI before any cancellation hides their target.
+        let isMouseDown = type == .leftMouseDown || type == .rightMouseDown
+        let mouseInsideSwitcher = isMouseDown && (containsMouseLocation?(event.location) ?? false)
+        let result = state.handle(type: type, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags,
+                                  mouseInsideSwitcher: mouseInsideSwitcher)
         if let command = result.command {
             // Returning quickly avoids event-tap timeouts when another app's AX server is slow.
             let generation = commandGeneration

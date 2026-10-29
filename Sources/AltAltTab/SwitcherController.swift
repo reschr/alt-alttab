@@ -10,9 +10,20 @@ struct CycleSelection {
     }
 }
 
+struct PointerSelection {
+    var location: NSPoint
+
+    mutating func moved(to location: NSPoint) -> Bool {
+        guard location != self.location else { return false }
+        self.location = location
+        return true
+    }
+}
+
 private struct SwitcherView: View {
     let windows: [WindowDiscovery.Window]
-    let selected: Int
+    @ObservedObject var controller: SwitcherController
+    private var selected: Int { controller.selection.index }
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -50,22 +61,23 @@ private struct SwitcherView: View {
                     .padding(.vertical, 8)
                 }
                 .scrollIndicators(.automatic)
-                // The panel is rebuilt on each keypress; reveal the selection immediately.
+                // Only keyboard cycling scrolls; hovering must leave the row under the pointer.
                 .onAppear { reader.scrollTo(selected) }
+                .onChange(of: controller.keyboardSelection) { _ in reader.scrollTo(selected) }
             }
 
             Divider().padding(.horizontal, 20)
             HStack(spacing: 12) {
                 Text("⇥ Next   ⇧⇥ Previous")
                 Spacer(minLength: 8)
-                Text("Release ⌥ to switch")
+                Text("Click or release ⌥ to switch")
                 Text("Esc Cancel")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 20)
             .frame(height: 34)
-            .accessibilityLabel("Tab for next, Shift-Tab for previous. Release Option to switch. Escape to cancel.")
+            .accessibilityLabel("Tab for next, Shift-Tab for previous. Click a window or release Option to switch. Escape to cancel.")
         }
         // A semantic AppKit material blends with windows behind this floating panel.
         .background {
@@ -90,7 +102,25 @@ private struct SwitcherView: View {
         // Use the system's paired selection colors to stay legible with any accent color.
         let foreground = isSelected ? Color(nsColor: .alternateSelectedControlTextColor) : .primary
 
-        return HStack(spacing: 12) {
+        return Button {
+            controller.select(index)
+            controller.onMouseCommit?()
+            controller.handle(.commit)
+        } label: {
+            rowContent(window: window, isSelected: isSelected, appName: appName, foreground: foreground)
+        }
+        .buttonStyle(.plain)
+        .onContinuousHover { phase in
+            // Enter events can come from showing or scrolling the panel under a stationary pointer.
+            if case .active = phase { controller.selectFromPointer(index) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(window.label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func rowContent(window: WindowDiscovery.Window, isSelected: Bool, appName: String, foreground: Color) -> some View {
+        HStack(spacing: 12) {
             Group {
                 if let icon = window.application.icon {
                     Image(nsImage: icon).resizable().interpolation(.high)
@@ -128,10 +158,13 @@ private struct SwitcherView: View {
                     .fill(Color(nsColor: .selectedContentBackgroundColor))
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(window.label)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .contentShape(Rectangle())
     }
+}
+
+// Accept the first click while another app stays active, including on macOS 13/14.
+private final class SwitcherHostingView: NSHostingView<SwitcherView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 private struct SwitcherMaterial: NSViewRepresentable {
@@ -148,11 +181,14 @@ private struct SwitcherMaterial: NSViewRepresentable {
 }
 
 @MainActor
-final class SwitcherController {
+final class SwitcherController: ObservableObject {
     private var windows: [WindowDiscovery.Window] = []
-    private var selection = CycleSelection(index: 0)
+    @Published private(set) var selection = CycleSelection(index: 0)
+    @Published private(set) var keyboardSelection = 0
+    var onMouseCommit: (() -> Void)?
     private var panel: NSPanel?
     private var screen: NSScreen?
+    private var pointerSelection = PointerSelection(location: .zero)
 
     func handle(_ command: ShortcutCommand) {
         switch command {
@@ -177,15 +213,36 @@ final class SwitcherController {
                 }
                 if let index = DisplayGeometry.displayIndex(for: bounds, displays: displayBounds) { screen = screens[index] }
             }
+            // Every keyboard step takes precedence until the pointer changes position again.
+            pointerSelection = PointerSelection(location: NSEvent.mouseLocation)
             selection.step(count: windows.count, backward: backward)
+            keyboardSelection += 1
             showPanel()
         }
     }
 
     func cancel() {
         panel?.orderOut(nil)
+        panel?.contentView = nil
         windows = []
         screen = nil
+    }
+
+    fileprivate func select(_ index: Int) {
+        guard windows.indices.contains(index), selection.index != index else { return }
+        selection.index = index
+    }
+
+    fileprivate func selectFromPointer(_ index: Int) {
+        guard pointerSelection.moved(to: NSEvent.mouseLocation) else { return }
+        select(index)
+    }
+
+    func containsMouseLocation(_ location: CGPoint) -> Bool {
+        guard let panel, panel.isVisible, let primaryScreen = NSScreen.screens.first else { return false }
+        // Event taps use a top-left origin; AppKit uses the primary display's bottom-left.
+        let point = NSPoint(x: location.x, y: primaryScreen.frame.maxY - location.y)
+        return panel.frame.contains(point)
     }
 
     private func showPanel() {
@@ -197,7 +254,9 @@ final class SwitcherController {
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             panel.hidesOnDeactivate = false
             panel.isReleasedWhenClosed = false
-            panel.ignoresMouseEvents = true
+            panel.ignoresMouseEvents = false
+            // Deliver hover tracking even though this panel never takes keyboard focus.
+            panel.acceptsMouseMovedEvents = true
             // Clear backing lets the material and rounded corners reach the desktop.
             panel.isOpaque = false
             panel.backgroundColor = .clear
@@ -209,7 +268,10 @@ final class SwitcherController {
         let listHeight = CGFloat(windows.count) * SwitcherView.rowHeight
             + CGFloat(max(0, windows.count - 1)) * SwitcherView.rowSpacing
         let height = min(listHeight + SwitcherView.chromeHeight, 540, max(1, frame.height - 40))
-        panel?.contentView = NSHostingView(rootView: SwitcherView(windows: windows, selected: selection.index))
+        // Keep the hosting view alive while cycling so pointer tracking and scrolling survive.
+        if panel?.contentView == nil {
+            panel?.contentView = SwitcherHostingView(rootView: SwitcherView(windows: windows, controller: self))
+        }
         panel?.setFrame(NSRect(x: frame.midX - width / 2, y: frame.midY - height / 2, width: width, height: height), display: true)
         panel?.orderFrontRegardless()
     }

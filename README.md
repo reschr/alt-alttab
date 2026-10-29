@@ -33,9 +33,9 @@ Quit other apps using Option-Tab while testing, so only one switcher handles the
 - Hold **Option** and press **Tab** to select the next window on the focused monitor and current desktop.
 - Keep holding Option and press Tab again to cycle. Add **Shift** to cycle backward.
 - Release **Option** to focus the selected window. Press **Escape** to cancel.
-- You can also click a window in the menu-bar list to focus it.
+- Move the pointer over a row to select it, then click to focus that window immediately. Opening the panel or cycling with the keyboard keeps the keyboard selection until the pointer moves. You can also click a window in the menu-bar list.
 
-The panel shows app icons and window titles, with no previews. Its list stays fixed while Option is held. A mouse click, another shortcut, a desktop/display change, or a change to the active app cancels selection. Closing or moving the selected window prevents activation if it is no longer eligible.
+The panel shows app icons and window titles, with no previews. Its list stays fixed while Option is held. A mouse click outside the panel, another shortcut, a desktop/display change, or a change to the active app cancels selection. Closing or moving the selected window prevents activation if it is no longer eligible.
 
 Click an app window on one monitor, then open the menu: only that monitor's current-desktop windows should appear. Repeat on the other monitor. Hidden and minimized windows are excluded. A spanning window belongs to the monitor containing its largest area (ties use display order).
 
@@ -56,7 +56,7 @@ swift test --disable-sandbox --cache-path "$PWD/.build/cache" \
   -Xswiftc -module-cache-path -Xswiftc "$PWD/.build/module-cache"
 ```
 
-Manually verify forward/backward cycling, Escape cancellation, two windows belonging to the same app, switching between different apps, and focus on both monitors. Confirm windows on other desktops never enter the panel. Releasing Option after a desktop change must not activate a window from the old list.
+Manually verify pointer selection, clicking a row while holding Option, outside-click cancellation, scrolling long lists, forward/backward cycling, Escape cancellation, two windows belonging to the same app, switching between different apps, and focus on both monitors. Confirm windows on other desktops never enter the panel. Releasing Option after a desktop change must not activate a window from the old list.
 
 ## macOS integration limits
 

@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = item
 
         shortcut.onCommand = { [weak self] command in self?.switcher.handle(command) }
+        shortcut.containsMouseLocation = { [weak self] point in self?.switcher.containsMouseLocation(point) ?? false }
+        // A click completes the session before Option-up can commit it a second time.
+        switcher.onMouseCommit = { [weak self] in self?.shortcut.cancel() }
         // Cancel a frozen selection if its desktop, display, or frontmost app changes.
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
             workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
