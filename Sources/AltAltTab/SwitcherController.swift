@@ -13,37 +13,138 @@ struct CycleSelection {
 private struct SwitcherView: View {
     let windows: [WindowDiscovery.Window]
     let selected: Int
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    // Share the row metrics with the panel so short lists fit without empty space.
+    static let rowHeight: CGFloat = 64
+    static let rowSpacing: CGFloat = 4
+    static let chromeHeight: CGFloat = 96
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Windows on this monitor").font(.headline)
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.on.rectangle")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("Windows").font(.headline)
+                Text("On this monitor").foregroundStyle(.secondary)
+                Spacer()
+                Text("\(selected + 1) of \(windows.count)")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 20)
+            .frame(height: 44)
+
+            Divider().padding(.horizontal, 20)
             ScrollViewReader { reader in
                 ScrollView {
-                    VStack(spacing: 4) {
+                    VStack(spacing: Self.rowSpacing) {
                         ForEach(windows.indices, id: \.self) { index in
-                            HStack(spacing: 12) {
-                                if let icon = windows[index].application.icon {
-                                    Image(nsImage: icon).resizable().frame(width: 32, height: 32).accessibilityHidden(true)
-                                }
-                                Text(windows[index].label).lineLimit(1).truncationMode(.middle)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(8)
-                            .background(index == selected ? Color.accentColor.opacity(0.3) : .clear)
-                            .cornerRadius(8)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityAddTraits(index == selected ? .isSelected : [])
-                            .id(index)
+                            row(at: index).id(index)
                         }
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                 }
+                .scrollIndicators(.automatic)
+                // The panel is rebuilt on each keypress; reveal the selection immediately.
                 .onAppear { reader.scrollTo(selected) }
             }
-            Text("Tab to cycle · Shift-Tab to go back · Release Option to switch · Esc to cancel")
-                .font(.caption).foregroundStyle(.secondary)
+
+            Divider().padding(.horizontal, 20)
+            HStack(spacing: 12) {
+                Text("⇥ Next   ⇧⇥ Previous")
+                Spacer(minLength: 8)
+                Text("Release ⌥ to switch")
+                Text("Esc Cancel")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 20)
+            .frame(height: 34)
+            .accessibilityLabel("Tab for next, Shift-Tab for previous. Release Option to switch. Escape to cancel.")
         }
-        .padding(16)
+        // A semantic AppKit material blends with windows behind this floating panel.
+        .background {
+            if reduceTransparency {
+                Color(nsColor: .windowBackgroundColor)
+            } else {
+                SwitcherMaterial()
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: contrast == .increased ? 2 : 1)
+                .allowsHitTesting(false)
+        }
     }
+
+    private func row(at index: Int) -> some View {
+        let window = windows[index]
+        let isSelected = index == selected
+        let appName = window.application.localizedName ?? "Unknown app"
+        // Use the system's paired selection colors to stay legible with any accent color.
+        let foreground = isSelected ? Color(nsColor: .alternateSelectedControlTextColor) : .primary
+
+        return HStack(spacing: 12) {
+            Group {
+                if let icon = window.application.icon {
+                    Image(nsImage: icon).resizable().interpolation(.high)
+                } else {
+                    Image(systemName: "macwindow").resizable().scaledToFit().padding(6)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(appName).font(.body.weight(.semibold))
+                if let title = window.title, title != appName {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(isSelected ? foreground : .secondary)
+                }
+            }
+            .lineLimit(1)
+            .truncationMode(.middle)
+
+            Spacer(minLength: 8)
+            // A symbol also identifies the selection without relying on color alone.
+            Image(systemName: "checkmark")
+                .font(.body.weight(.medium))
+                .opacity(isSelected ? 1 : 0)
+                .accessibilityHidden(true)
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, 12)
+        .frame(height: Self.rowHeight)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .selectedContentBackgroundColor))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(window.label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct SwitcherMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .popover
+        view.blendingMode = .behindWindow
+        // Nonactivating panels never become key, but this transient surface is in use.
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 @MainActor
@@ -97,13 +198,17 @@ final class SwitcherController {
             panel.hidesOnDeactivate = false
             panel.isReleasedWhenClosed = false
             panel.ignoresMouseEvents = true
-            panel.backgroundColor = .windowBackgroundColor
+            // Clear backing lets the material and rounded corners reach the desktop.
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
             panel.hasShadow = true
             self.panel = panel
         }
         let frame = screen.visibleFrame
-        let width = min(620, max(1, frame.width - 40))
-        let height = min(CGFloat(windows.count * 56 + 88), 480, max(1, frame.height - 40))
+        let width = min(560, max(1, frame.width - 40))
+        let listHeight = CGFloat(windows.count) * SwitcherView.rowHeight
+            + CGFloat(max(0, windows.count - 1)) * SwitcherView.rowSpacing
+        let height = min(listHeight + SwitcherView.chromeHeight, 540, max(1, frame.height - 40))
         panel?.contentView = NSHostingView(rootView: SwitcherView(windows: windows, selected: selection.index))
         panel?.setFrame(NSRect(x: frame.midX - width / 2, y: frame.midY - height / 2, width: width, height: height), display: true)
         panel?.orderFrontRegardless()
