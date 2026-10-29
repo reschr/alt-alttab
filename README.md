@@ -17,7 +17,7 @@ bash scripts/build.sh
 open .build/AltAltTab.app
 ```
 
-The app adds an overlapping-rectangles icon to the menu bar. On launch, grant **AltAltTab** access in **System Settings → Privacy & Security → Accessibility**. The menu also contains **Open Accessibility Settings…**. After granting access, open the app's menu again to enable the shortcut; its status should read **Option-Tab is ready**. Permission is checked at launch, when the menu opens, and before switching, with no periodic permission timer.
+The app adds an overlapping-rectangles icon to the menu bar. On launch, grant **AltAltTab** access in **System Settings → Privacy & Security → Accessibility**. The menu also contains **Open Accessibility Settings…**. After granting access, open the app's menu again to enable the shortcut; its status should read **Option-Tab is ready**. Permission is checked at launch, when the menu opens, and before switching, with no periodic permission timer. When macOS reports that the input hook has been disabled, the app stops interception and cancels switching. After restoring permission, open the menu to restart the shortcut. A timeout also stops the shortcut until the menu is opened.
 
 If an older copy is already running, quit it before reopening the rebuilt app:
 

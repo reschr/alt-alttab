@@ -50,12 +50,14 @@ struct ShortcutState {
 final class GlobalShortcut {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var commandGeneration = 0
     private var state = ShortcutState()
     var onCommand: ((ShortcutCommand) -> Void)?
     var isRunning: Bool { tap != nil }
 
     func start() -> Bool {
         if tap != nil { return true }
+        guard WindowAccess.isTrusted else { return false }
         let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .leftMouseDown, .rightMouseDown]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         guard let tap = CGEvent.tapCreate(
@@ -79,6 +81,9 @@ final class GlobalShortcut {
     }
 
     func stop() {
+        // Invalidate queued commands before they can reopen the panel or focus a window.
+        commandGeneration += 1
+        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         if let tap { CFMachPortInvalidate(tap) }
         source = nil
@@ -89,17 +94,21 @@ final class GlobalShortcut {
 
     func cancel() { state.cancel() }
 
-    private func process(_ type: CGEventType, _ event: CGEvent) -> Bool {
+    func process(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            state.cancel()
-            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            DispatchQueue.main.async { self.onCommand?(.cancel) }
+            // Never fight macOS disabling input interception: revocation can otherwise
+            // produce a disable/re-enable loop. Restart only when the menu is opened.
+            stop()
             return false
         }
         let result = state.handle(type: type, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags)
         if let command = result.command {
             // Returning quickly avoids event-tap timeouts when another app's AX server is slow.
-            DispatchQueue.main.async { self.onCommand?(command) }
+            let generation = commandGeneration
+            DispatchQueue.main.async {
+                guard self.commandGeneration == generation else { return }
+                self.onCommand?(command)
+            }
         }
         return result.consume
     }

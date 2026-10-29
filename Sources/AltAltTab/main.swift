@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         cancelSwitching()
-        // Opening the menu picks up permission changes without periodic idle wakeups.
+        // Only launch or an explicit menu open can restart a stopped input tap.
         refreshShortcut()
         menu.removeAllItems()
         menu.addItem(withTitle: shortcutStatus, action: nil, keyEquivalent: "")
