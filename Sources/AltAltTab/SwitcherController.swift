@@ -17,8 +17,8 @@ private struct SwitcherView: View {
     @Environment(\.colorSchemeContrast) private var contrast
 
     // Share the row metrics with the panel so short lists fit without empty space.
-    static let rowHeight: CGFloat = 64
-    static let rowSpacing: CGFloat = 4
+    static let rowHeight: CGFloat = 48
+    static let rowSpacing: CGFloat = 2
     static let chromeHeight: CGFloat = 96
 
     var body: some View {
@@ -98,10 +98,10 @@ private struct SwitcherView: View {
                     Image(systemName: "macwindow").resizable().scaledToFit().padding(6)
                 }
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 32, height: 32)
             .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(appName).font(.body.weight(.semibold))
                 if let title = window.title, title != appName {
                     Text(title)
