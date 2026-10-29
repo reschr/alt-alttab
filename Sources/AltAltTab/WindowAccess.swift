@@ -1,9 +1,11 @@
 import AppKit
 import ApplicationServices
 import Darwin
+import OSLog
 
 @MainActor
 enum WindowAccess {
+    private static let logger = Logger(subsystem: "local.alt-alttab", category: "WindowAccess")
     // Public AX APIs have no window ID. Resolve this private bridge dynamically so
     // a macOS update removing it disables switching instead of crashing at launch.
     private typealias WindowIDFunction = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
@@ -67,9 +69,19 @@ enum WindowAccess {
         let app = AXUIElementCreateApplication(fresh.snapshot.processID)
         AXUIElementSetMessagingTimeout(app, 0.2)
         _ = AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
-        guard AXUIElementPerformAction(element, kAXRaiseAction as CFString) == .success else { return false }
+        // A background app may reject or time out raising; still request activation, then retry.
+        _ = AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         _ = AXUIElementSetAttributeValue(app, kAXFocusedWindowAttribute as CFString, element)
-        guard fresh.application.activate(options: [.activateIgnoringOtherApps]) else { return false }
-        return AXUIElementPerformAction(element, kAXRaiseAction as CFString) == .success
+        guard fresh.application.activate(options: [.activateIgnoringOtherApps]) else {
+            logger.error("App activation rejected for PID \(fresh.snapshot.processID)")
+            return false
+        }
+        let result = AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+        if result == .success { return true }
+        // AX can time out after performing the action; verify the app and exact selected window.
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == fresh.snapshot.processID,
+           focusedWindowID(processID: fresh.snapshot.processID) == fresh.snapshot.id { return true }
+        logger.error("Window raise failed for PID \(fresh.snapshot.processID), window \(fresh.snapshot.id), AX error \(result.rawValue)")
+        return false
     }
 }
