@@ -1,4 +1,4 @@
-# AltAltTab
+# Alternative AltTab
 
 A native macOS window switcher focused on the current desktop (Space), with icons and titles instead of previews.
 
