@@ -31,6 +31,8 @@ private struct SwitcherView: View {
     static let rowHeight: CGFloat = 48
     static let rowSpacing: CGFloat = 2
     static let chromeHeight: CGFloat = 96
+    // Adjust the list's app icons here; keep smaller than rowHeight for vertical padding.
+    static let iconSize: CGFloat = 40
 
     var body: some View {
         VStack(spacing: 0) {
@@ -128,7 +130,7 @@ private struct SwitcherView: View {
                     Image(systemName: "macwindow").resizable().scaledToFit().padding(6)
                 }
             }
-            .frame(width: 32, height: 32)
+            .frame(width: Self.iconSize, height: Self.iconSize)
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
