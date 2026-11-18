@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Testing
 @testable import AltAltTab
@@ -61,4 +62,49 @@ private func windowInfo() -> [String: Any] {
     ]
     #expect(DisplayGeometry.displayIndex(for: CGRect(x: -900, y: -700, width: 600, height: 500), displays: displays) == 1)
     #expect(DisplayGeometry.displayIndex(for: CGRect(x: 0, y: 0, width: 500, height: 500), displays: []) == nil)
+}
+
+@Test @MainActor func releasingOptionDuringDiscoveryCommitsTheQueuedSelection() async throws {
+    let application = NSRunningApplication.current
+    let windows = try (1...3).map { number in
+        var info = windowInfo()
+        info[kCGWindowNumber as String] = UInt32(number)
+        let snapshot = try #require(WindowSnapshot(info: info))
+        return WindowDiscovery.Window(snapshot: snapshot, application: application, isSwitchable: true, title: nil)
+    }
+    let desktop = WindowDiscovery.Desktop(screen: nil, focusedWindowID: 1, windows: windows)
+    var activated: [CGWindowID] = []
+    var discoveryCount = 0
+    let (firstQuery, startFirstQuery) = AsyncStream<Void>.makeStream()
+    let (firstResult, returnFirstResult) = AsyncStream<Void>.makeStream()
+    let switcher = SwitcherController(discover: {
+        discoveryCount += 1
+        if discoveryCount == 1 {
+            startFirstQuery.yield(())
+            var results = firstResult.makeAsyncIterator()
+            _ = await results.next()
+        }
+        return desktop
+    }) { window in
+        activated.append(window.snapshot.id)
+        return true
+    }
+
+    switcher.handle(.step(backward: true))
+    var starts = firstQuery.makeAsyncIterator()
+    _ = await starts.next()
+    switcher.handle(.commit)
+    switcher.cancel()
+    returnFirstResult.yield(())
+
+    // These arrive before the async discovery task has a chance to run.
+    switcher.handle(.step(backward: false))
+    switcher.handle(.step(backward: false))
+    switcher.handle(.step(backward: true))
+    switcher.handle(.commit)
+
+    for _ in 0..<100 where activated.isEmpty {
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(activated == [2])
 }

@@ -208,42 +208,108 @@ final class SwitcherController: ObservableObject {
     private var panel: NSPanel?
     private var screen: NSScreen?
     private var pointerSelection = PointerSelection(location: .zero)
+    private var discoveryTask: Task<Void, Never>?
+    private var pendingSteps: [Bool] = []
+    private var commitWhenReady = false
+    private var activationTask: Task<Void, Never>?
+    private var activationPID: pid_t?
+    private let discover: @MainActor () async -> WindowDiscovery.Desktop?
+    private let focus: @MainActor (WindowDiscovery.Window) async -> Bool
+
+    init(
+        discover: @escaping @MainActor () async -> WindowDiscovery.Desktop? = WindowDiscovery.currentDesktopWindows,
+        focus: @escaping @MainActor (WindowDiscovery.Window) async -> Bool = WindowAccess.focus
+    ) {
+        self.discover = discover
+        self.focus = focus
+    }
 
     func handle(_ command: ShortcutCommand) {
         switch command {
-        case .cancel: cancel()
-        case .commit:
-            let window = windows.indices.contains(selection.index) ? windows[selection.index] : nil
+        case .cancel:
             cancel()
-            if let window, !WindowAccess.focus(window) { NSSound.beep() }
-        case .step(let backward):
-            guard WindowAccess.isTrusted else {
-                cancel()
+            cancelActivation()
+        case .commit:
+            if discoveryTask != nil {
+                // A quick Option release still commits the selection being loaded.
+                commitWhenReady = true
                 return
             }
-            if windows.isEmpty {
-                let desktop = WindowDiscovery.currentDesktopWindows()
-                windows = (desktop?.windows ?? []).filter {
-                    $0.accessibilityElement != nil
-                }
-                guard !windows.isEmpty else {
-                    NSSound.beep()
-                    return
-                }
-                screen = desktop?.screen
-                let focusedIndex = windows.firstIndex { $0.snapshot.id == desktop?.focusedWindowID }
-                selection = .first(count: windows.count, focusedIndex: focusedIndex, backward: backward)
-            } else {
+            let window = windows.indices.contains(selection.index) ? windows[selection.index] : nil
+            cancel()
+            if let window { activate(window) }
+        case .step(let backward):
+            if commitWhenReady { cancel() }
+            if !windows.isEmpty {
                 selection.step(count: windows.count, backward: backward)
+                showKeyboardSelection()
+                return
             }
-            // Every keyboard step takes precedence until the pointer changes position again.
-            pointerSelection = PointerSelection(location: NSEvent.mouseLocation)
-            keyboardSelection += 1
-            showPanel()
+            pendingSteps.append(backward)
+            guard discoveryTask == nil else { return }
+            cancelActivation()
+            discoveryTask = Task { [weak self, discover] in
+                let desktop = await discover()
+                guard !Task.isCancelled else { return }
+                self?.finishDiscovery(desktop)
+            }
         }
     }
 
+    private func finishDiscovery(_ desktop: WindowDiscovery.Desktop?) {
+        discoveryTask = nil
+        windows = desktop?.windows.filter(\.isSwitchable) ?? []
+        guard let firstStep = pendingSteps.first, !windows.isEmpty else {
+            cancel()
+            NSSound.beep()
+            return
+        }
+        let focusedIndex = windows.firstIndex { $0.snapshot.id == desktop?.focusedWindowID }
+        selection = .first(count: windows.count, focusedIndex: focusedIndex, backward: firstStep)
+        for backward in pendingSteps.dropFirst() {
+            selection.step(count: windows.count, backward: backward)
+        }
+        pendingSteps.removeAll()
+        screen = desktop?.screen
+        if commitWhenReady {
+            handle(.commit)
+        } else {
+            showKeyboardSelection()
+        }
+    }
+
+    private func showKeyboardSelection() {
+        // Every keyboard step takes precedence until the pointer changes position again.
+        pointerSelection = PointerSelection(location: NSEvent.mouseLocation)
+        keyboardSelection += 1
+        showPanel()
+    }
+
+    func activate(_ window: WindowDiscovery.Window) {
+        cancelActivation()
+        activationPID = window.snapshot.processID
+        activationTask = Task { [weak self, focus] in
+            let focused = await focus(window)
+            guard !Task.isCancelled else { return }
+            self?.activationTask = nil
+            self?.activationPID = nil
+            if !focused { NSSound.beep() }
+        }
+    }
+
+    func cancelActivation(except processID: pid_t? = nil) {
+        // The notification for our own activation must let focus confirmation finish.
+        if let processID, processID == activationPID { return }
+        activationTask?.cancel()
+        activationTask = nil
+        activationPID = nil
+    }
+
     func cancel() {
+        discoveryTask?.cancel()
+        discoveryTask = nil
+        pendingSteps.removeAll()
+        commitWhenReady = false
         panel?.orderOut(nil)
         panel?.contentView = nil
         windows = []
