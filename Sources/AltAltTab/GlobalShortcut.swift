@@ -9,7 +9,8 @@ struct ShortcutState {
     private(set) var active = false
     private var swallowedKeys: Set<Int64> = []
 
-    mutating func handle(type: CGEventType, key: Int64, flags: CGEventFlags, mouseInsideSwitcher: Bool = false) -> (consume: Bool, command: ShortcutCommand?) {
+    mutating func handle(type: CGEventType, key: Int64, flags: CGEventFlags, isRepeat: Bool = false,
+                         mouseInsideSwitcher: Bool = false) -> (consume: Bool, command: ShortcutCommand?) {
         if type == .keyUp { return (swallowedKeys.remove(key) != nil, nil) }
         if type == .flagsChanged, active {
             if !flags.contains(.maskAlternate) {
@@ -22,6 +23,9 @@ struct ShortcutState {
             }
         }
         if type == .keyDown {
+            // Repeats belong to the intercepted press until key-up, even after cancellation.
+            if isRepeat, swallowedKeys.contains(key), !active || key != 48 { return (true, nil) }
+            if !isRepeat { swallowedKeys.remove(key) }
             if key == 48, flags.contains(.maskAlternate), flags.intersection([.maskCommand, .maskControl]).isEmpty {
                 active = true
                 swallowedKeys.insert(key)
@@ -29,8 +33,9 @@ struct ShortcutState {
             }
             if active {
                 active = false
+                let consume = key == 53 || swallowedKeys.contains(key)
                 if key == 53 { swallowedKeys.insert(key) }
-                return (key == 53, .cancel)
+                return (consume, .cancel)
             }
         }
         if active, (type == .leftMouseDown || type == .rightMouseDown), !mouseInsideSwitcher {
@@ -110,6 +115,7 @@ final class GlobalShortcut {
         let isMouseDown = type == .leftMouseDown || type == .rightMouseDown
         let mouseInsideSwitcher = isMouseDown && (containsMouseLocation?(event.location) ?? false)
         let result = state.handle(type: type, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags,
+                                  isRepeat: type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
                                   mouseInsideSwitcher: mouseInsideSwitcher)
         if let command = result.command {
             // Returning quickly avoids event-tap timeouts when another app's AX server is slow.

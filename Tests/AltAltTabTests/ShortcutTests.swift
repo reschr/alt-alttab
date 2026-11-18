@@ -92,6 +92,21 @@ import Testing
     #expect(state.handle(type: .flagsChanged, key: 58, flags: []).command == nil)
 }
 
+@Test func interceptedRepeatsStaySwallowedUntilKeyUp() {
+    var state = ShortcutState()
+    _ = state.handle(type: .keyDown, key: 48, flags: .maskAlternate)
+    #expect(state.handle(type: .keyDown, key: 48, flags: .maskAlternate, isRepeat: true).command == .step(backward: false))
+    #expect(state.handle(type: .keyDown, key: 53, flags: .maskAlternate).command == .cancel)
+    for key: Int64 in [48, 53] {
+        let repeatPress = state.handle(type: .keyDown, key: key, flags: .maskAlternate, isRepeat: true)
+        #expect(repeatPress.consume)
+        #expect(repeatPress.command == nil)
+        #expect(state.handle(type: .keyUp, key: key, flags: .maskAlternate).consume)
+    }
+    #expect(state.handle(type: .flagsChanged, key: 58, flags: []).command == nil)
+    #expect(state.handle(type: .keyDown, key: 48, flags: .maskAlternate).command == .step(backward: false))
+}
+
 @Test func clicksModifiersAndDesktopChangesCancelSelection() {
     var state = ShortcutState()
     _ = state.handle(type: .keyDown, key: 48, flags: .maskAlternate)
