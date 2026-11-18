@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var workspaceObservers: [NSObjectProtocol] = []
     private var screenObserver: NSObjectProtocol?
     private var menuDiscoveryTask: Task<Void, Never>?
-    private var shortcutStatus = "Accessibility permission needed"
+    private var shortcutStatus = "Window control permission needed"
     private let statusMenuItem = NSMenuItem()
     private let loadingMenuItem = NSMenuItem(title: "Loading windows…", action: nil, keyEquivalent: "")
 
@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         statusMenuItem.title = shortcutStatus
         menu.addItem(statusMenuItem)
-        let permission = menu.addItem(withTitle: "Open Accessibility Settings…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
+        let permission = menu.addItem(withTitle: "Open Privacy & Security Settings…", action: #selector(openPrivacySettings), keyEquivalent: "")
         permission.target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Windows on focused monitor", action: nil, keyEquivalent: "")
@@ -129,9 +129,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func openAccessibilitySettings() {
+    @objc private func openPrivacySettings() {
         WindowAccess.requestPermission()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+        // macOS 27 groups the window control permission under Device Control and Data Access.
+        let pane = "x-apple.systempreferences:com.apple.preference.security"
+        let destination: String
+        if #available(macOS 27, *) {
+            destination = pane
+        } else {
+            destination = pane + "?Privacy_Accessibility"
+        }
+        if let url = URL(string: destination) {
             NSWorkspace.shared.open(url)
         }
     }
@@ -139,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshShortcut() {
         guard WindowAccess.isTrusted else {
             if shortcut.isRunning { shortcut.stop() }
-            shortcutStatus = "Accessibility permission needed"
+            shortcutStatus = "Window control permission needed"
             return
         }
         guard WindowAccess.supportsWindowIDs else {
@@ -147,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             shortcutStatus = "Window switching unavailable on this macOS version"
             return
         }
-        shortcutStatus = shortcut.start() ? "Option-Tab is ready" : "Shortcut unavailable — check Accessibility and restart"
+        shortcutStatus = shortcut.start() ? "Option-Tab is ready" : "Shortcut unavailable — check Privacy & Security and restart"
     }
 
     private func cancelSwitching(exceptActivationOf processID: pid_t? = nil) {
