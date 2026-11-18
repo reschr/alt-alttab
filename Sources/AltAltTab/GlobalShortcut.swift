@@ -93,7 +93,11 @@ final class GlobalShortcut {
         onCommand?(.cancel)
     }
 
-    func cancel() { state.cancel() }
+    func cancel() {
+        // Workspace notifications and row clicks can arrive before queued key commands.
+        commandGeneration += 1
+        state.cancel()
+    }
 
     func process(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {

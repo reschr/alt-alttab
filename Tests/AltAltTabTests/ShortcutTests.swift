@@ -40,6 +40,24 @@ import Testing
     #expect(!shortcut.process(.keyUp, event))
 }
 
+@Test @MainActor func cancellingShortcutDiscardsQueuedCommandsButStillConsumesKeyUp() async throws {
+    let shortcut = GlobalShortcut()
+    var commands: [ShortcutCommand] = []
+    shortcut.onCommand = { commands.append($0) }
+    let event = try #require(CGEvent(keyboardEventSource: nil, virtualKey: 48, keyDown: true))
+    event.flags = .maskAlternate
+    #expect(shortcut.process(.keyDown, event))
+    event.flags = []
+    #expect(!shortcut.process(.flagsChanged, event))
+    shortcut.cancel()
+    #expect(shortcut.process(.keyUp, event))
+
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.async { continuation.resume() }
+    }
+    #expect(commands.isEmpty)
+}
+
 @Test func cyclesAndCommitsOnlyWhenOptionIsReleased() {
     var state = ShortcutState()
     let first = state.handle(type: .keyDown, key: 48, flags: .maskAlternate)
