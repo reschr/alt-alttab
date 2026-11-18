@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "Windows on focused monitor", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
 
-        if let windows = WindowDiscovery.currentDesktopWindows() {
+        if let windows = WindowDiscovery.currentDesktopWindows()?.windows {
             if windows.isEmpty {
                 menu.addItem(withTitle: "No windows found", action: nil, keyEquivalent: "")
             }

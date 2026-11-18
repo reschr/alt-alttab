@@ -63,7 +63,7 @@ enum WindowAccess {
         // Recheck current Space/monitor membership: a window can move or close
         // while the selection panel is open. Never activate a substitute window.
         guard isTrusted,
-              let fresh = WindowDiscovery.currentDesktopWindows()?.first(where: {
+              let fresh = WindowDiscovery.currentDesktopWindows()?.windows.first(where: {
                   $0.snapshot.id == window.snapshot.id && $0.snapshot.processID == window.snapshot.processID
               }), let element = fresh.accessibilityElement else { return false }
         let app = AXUIElementCreateApplication(fresh.snapshot.processID)

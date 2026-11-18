@@ -59,7 +59,13 @@ enum WindowDiscovery {
         }
     }
 
-    static func currentDesktopWindows() -> [Window]? {
+    struct Desktop {
+        let screen: NSScreen?
+        let focusedWindowID: CGWindowID?
+        let windows: [Window]
+    }
+
+    static func currentDesktopWindows() -> Desktop? {
         // Onscreen enumeration excludes other Spaces and minimized/hidden windows.
         guard let info = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
@@ -75,28 +81,29 @@ enum WindowDiscovery {
         }
 
         // Use Quartz coordinates for both windows and displays: AppKit flips the Y axis.
-        let displays = NSScreen.screens.compactMap { screen -> CGRect? in
+        let displays = NSScreen.screens.compactMap { screen -> (screen: NSScreen, bounds: CGRect)? in
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
             else { return nil }
-            return CGDisplayBounds(number.uint32Value)
+            return (screen, CGDisplayBounds(number.uint32Value))
         }
+        let displayBounds = displays.map(\.bounds)
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let focusedID = frontmostPID.flatMap { WindowAccess.focusedWindowID(processID: $0) }
         // Before permission is granted, retain the previously validated focus approximation.
         let focusedWindow = windows.first { $0.snapshot.id == focusedID }
             ?? windows.first { $0.snapshot.processID == frontmostPID }
         guard let focusedWindow,
-              let focusedDisplay = DisplayGeometry.displayIndex(for: focusedWindow.snapshot.bounds, displays: displays)
+              let focusedDisplay = DisplayGeometry.displayIndex(for: focusedWindow.snapshot.bounds, displays: displayBounds)
         else {
             // With no active ordinary window (for example the desktop), show no candidates.
-            return []
+            return Desktop(screen: nil, focusedWindowID: nil, windows: [])
         }
         let candidates = windows.filter {
-            DisplayGeometry.displayIndex(for: $0.snapshot.bounds, displays: displays) == focusedDisplay
+            DisplayGeometry.displayIndex(for: $0.snapshot.bounds, displays: displayBounds) == focusedDisplay
         }
         // Ask each app once, and only for candidates on the selected monitor.
         var elementsByProcess: [pid_t: [CGWindowID: AXUIElement]] = [:]
-        return candidates.map { window in
+        let matches = candidates.map { window in
             let pid = window.snapshot.processID
             if elementsByProcess[pid] == nil { elementsByProcess[pid] = WindowAccess.windows(processID: pid) }
             let element = elementsByProcess[pid]?[window.snapshot.id]
@@ -107,5 +114,6 @@ enum WindowDiscovery {
                 title: title?.isEmpty == false ? title : window.snapshot.title
             )
         }
+        return Desktop(screen: displays[focusedDisplay].screen, focusedWindowID: focusedWindow.snapshot.id, windows: matches)
     }
 }

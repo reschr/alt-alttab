@@ -4,6 +4,13 @@ import SwiftUI
 struct CycleSelection {
     var index: Int
 
+    static func first(count: Int, focusedIndex: Int?, backward: Bool) -> Self {
+        // If the focused window is unavailable, step across the list boundary.
+        var selection = Self(index: focusedIndex ?? (backward ? 0 : count - 1))
+        selection.step(count: count, backward: backward)
+        return selection
+    }
+
     mutating func step(count: Int, backward: Bool) {
         guard count > 0 else {
             index = 0
@@ -215,31 +222,22 @@ final class SwitcherController: ObservableObject {
                 return
             }
             if windows.isEmpty {
-                windows = (WindowDiscovery.currentDesktopWindows() ?? []).filter {
+                let desktop = WindowDiscovery.currentDesktopWindows()
+                windows = (desktop?.windows ?? []).filter {
                     $0.accessibilityElement != nil
                 }
                 guard !windows.isEmpty else {
                     NSSound.beep()
                     return
                 }
-                let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
-                let focusedID = pid.flatMap { WindowAccess.focusedWindowID(processID: $0) }
-                selection.index = windows.firstIndex { $0.snapshot.id == focusedID } ?? 0
-                let bounds = windows[selection.index].snapshot.bounds
-                let screens = NSScreen.screens
-                let displayBounds = screens.map { screen in
-                    let id =
-                        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
-                        as? NSNumber)?.uint32Value ?? 0
-                    return CGDisplayBounds(id)
-                }
-                if let index = DisplayGeometry.displayIndex(for: bounds, displays: displayBounds) {
-                    screen = screens[index]
-                }
+                screen = desktop?.screen
+                let focusedIndex = windows.firstIndex { $0.snapshot.id == desktop?.focusedWindowID }
+                selection = .first(count: windows.count, focusedIndex: focusedIndex, backward: backward)
+            } else {
+                selection.step(count: windows.count, backward: backward)
             }
             // Every keyboard step takes precedence until the pointer changes position again.
             pointerSelection = PointerSelection(location: NSEvent.mouseLocation)
-            selection.step(count: windows.count, backward: backward)
             keyboardSelection += 1
             showPanel()
         }

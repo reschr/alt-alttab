@@ -133,6 +133,12 @@ import Testing
     #expect(selection.index == 0)
 }
 
+@Test func firstStepUsesListBoundaryWhenTheFocusedWindowIsUnavailable() {
+    #expect(CycleSelection.first(count: 2, focusedIndex: nil, backward: false).index == 0)
+    #expect(CycleSelection.first(count: 2, focusedIndex: nil, backward: true).index == 1)
+    #expect(CycleSelection.first(count: 2, focusedIndex: 0, backward: false).index == 1)
+}
+
 @Test func panelClicksReachRowsWithoutCancellingAndMouseCommitEndsSession() {
     var state = ShortcutState()
     _ = state.handle(type: .keyDown, key: 48, flags: .maskAlternate)
