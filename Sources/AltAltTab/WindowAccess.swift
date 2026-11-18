@@ -76,11 +76,43 @@ enum WindowAccess {
 
     @MainActor
     static func focus(_ window: WindowDiscovery.Window) async -> Bool {
-        guard !Task.isCancelled, let context = WindowDiscovery.currentContext() else { return false }
-        return await offMain { focus(window, in: context) }
+        guard !Task.isCancelled, let context = WindowDiscovery.currentContext(),
+              await offMain({ attemptFocus(window, in: context) }) else { return false }
+        let target = window.snapshot
+        // An accepted activation or raise can finish before macOS updates keyboard focus.
+        let focused = await confirmFocus(of: target.id) {
+            guard window.application.isActive else { return nil }
+            let id = await offMain { focusedWindowID(processID: target.processID) }
+            return window.application.isActive ? id : nil
+        }
+        if !focused, !Task.isCancelled {
+            logger.error("Focus not confirmed for PID \(target.processID), window \(target.id)")
+        }
+        return focused
     }
 
-    private static func focus(_ window: WindowDiscovery.Window, in context: WindowDiscovery.Context) -> Bool {
+    @MainActor
+    static func confirmFocus(
+        of targetID: CGWindowID,
+        timeout: Duration = .milliseconds(450),
+        currentFocus: @MainActor () async -> CGWindowID?
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        repeat {
+            guard !Task.isCancelled else { return false }
+            if await currentFocus() == targetID { return !Task.isCancelled }
+            guard clock.now < deadline else { return false }
+            do {
+                try await clock.sleep(until: min(deadline, clock.now + .milliseconds(35)))
+            } catch {
+                return false
+            }
+        } while clock.now < deadline
+        return false
+    }
+
+    private static func attemptFocus(_ window: WindowDiscovery.Window, in context: WindowDiscovery.Context) -> Bool {
         // Recheck current Space/monitor membership: a window can move or close
         // while the selection panel is open. Never activate a substitute window.
         let target = window.snapshot
@@ -100,11 +132,12 @@ enum WindowAccess {
             logger.error("App activation rejected for PID \(target.processID)")
             return false
         }
+        guard !Task.isCancelled else { return false }
         let result = AXUIElementPerformAction(element, kAXRaiseAction as CFString)
-        if result == .success { return true }
-        // AX can time out after performing the action; verify the app and exact selected window.
-        if window.application.isActive, focusedWindowID(processID: target.processID) == target.id { return true }
-        logger.error("Window raise failed for PID \(target.processID), window \(target.id), AX error \(result.rawValue)")
-        return false
+        if result != .success {
+            // An AX timeout can still leave the requested window focused.
+            logger.debug("Raise returned AX error \(result.rawValue) for PID \(target.processID), window \(target.id)")
+        }
+        return true
     }
 }

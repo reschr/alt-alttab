@@ -108,3 +108,13 @@ private func windowInfo() -> [String: Any] {
     }
     #expect(activated == [2])
 }
+
+@Test @MainActor func focusConfirmationRequiresTheSelectedWindow() async {
+    let wrongWindow = await WindowAccess.confirmFocus(of: 42, timeout: .zero) { 41 }
+    #expect(!wrongWindow)
+
+    var observations: [CGWindowID?] = [nil, 41, 42]
+    let delayedFocus = await WindowAccess.confirmFocus(of: 42) { observations.removeFirst() }
+    #expect(delayedFocus)
+    #expect(observations.isEmpty)
+}
