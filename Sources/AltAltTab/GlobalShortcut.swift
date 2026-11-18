@@ -1,5 +1,8 @@
 import AppKit
 
+// Quartz uses otherMouseDown for the middle button and additional mouse buttons.
+private let mouseDownEvents: [CGEventType] = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+
 enum ShortcutCommand: Equatable {
     case step(backward: Bool), commit, cancel
 }
@@ -38,7 +41,7 @@ struct ShortcutState {
                 return (consume, .cancel)
             }
         }
-        if active, (type == .leftMouseDown || type == .rightMouseDown), !mouseInsideSwitcher {
+        if active, mouseDownEvents.contains(type), !mouseInsideSwitcher {
             active = false
             return (false, .cancel)
         }
@@ -64,7 +67,7 @@ final class GlobalShortcut {
     func start() -> Bool {
         if tap != nil { return true }
         guard WindowAccess.isTrusted else { return false }
-        let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .leftMouseDown, .rightMouseDown]
+        let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged] + mouseDownEvents
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -112,8 +115,8 @@ final class GlobalShortcut {
             return false
         }
         // In-panel clicks must reach SwiftUI before any cancellation hides their target.
-        let isMouseDown = type == .leftMouseDown || type == .rightMouseDown
-        let mouseInsideSwitcher = isMouseDown && (containsMouseLocation?(event.location) ?? false)
+        let mouseInsideSwitcher = mouseDownEvents.contains(type)
+            && (containsMouseLocation?(event.location) ?? false)
         let result = state.handle(type: type, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags,
                                   isRepeat: type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
                                   mouseInsideSwitcher: mouseInsideSwitcher)

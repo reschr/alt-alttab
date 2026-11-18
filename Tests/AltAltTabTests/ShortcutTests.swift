@@ -136,7 +136,7 @@ import Testing
 @Test func panelClicksReachRowsWithoutCancellingAndMouseCommitEndsSession() {
     var state = ShortcutState()
     _ = state.handle(type: .keyDown, key: 48, flags: .maskAlternate)
-    for type: CGEventType in [.leftMouseDown, .rightMouseDown] {
+    for type: CGEventType in [.leftMouseDown, .rightMouseDown, .otherMouseDown] {
         let click = state.handle(type: type, key: 0, flags: .maskAlternate, mouseInsideSwitcher: true)
         #expect(!click.consume)
         #expect(click.command == nil)
@@ -157,13 +157,13 @@ import Testing
     event.flags = .maskAlternate
     #expect(shortcut.process(.keyDown, event))
     event.location = CGPoint(x: 100, y: 100)
-    #expect(!shortcut.process(.leftMouseDown, event))
+    #expect(!shortcut.process(.otherMouseDown, event))
     await withCheckedContinuation { continuation in
         DispatchQueue.main.async { continuation.resume() }
     }
     #expect(commands == [.step(backward: false)])
     event.location = CGPoint(x: 200, y: 100)
-    #expect(!shortcut.process(.leftMouseDown, event))
+    #expect(!shortcut.process(.otherMouseDown, event))
     await withCheckedContinuation { continuation in
         DispatchQueue.main.async { continuation.resume() }
     }
